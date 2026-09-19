@@ -29,6 +29,7 @@ Read `portals.yml` which contains:
 - `tracked_companies`: Specific companies with `careers_url` for direct navigation
 - `tracked_companies[].parser`: Optional local parser for SSR pages or stable HTML
 - `title_filter`: Keywords (positive/negative/seniority_boost) for filtering job titles
+- `notion_applied_filter` (optional): when enabled/auto and Notion credentials exist, `scan.mjs` syncs the Notion Applications DB and skips requisitions whose Job Link (or company+role) is already applied. Prefer running the zero-token scanner: `node scan.mjs` or `npm run scan` — the agent should not re-implement this gate by hand.
 
 ## Discovery Strategy (4 Levels)
 

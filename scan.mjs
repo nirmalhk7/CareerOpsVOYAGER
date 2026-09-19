@@ -2479,7 +2479,7 @@ const SCAN_RUNS_PATH = path.join(DATA_ROOT, 'data/scan-runs.tsv');
 // writeRunFailureRow (#2643) so trend stats can exclude survivorship bias.
 // Consumers MUST parse by header name, never by position — columns may be
 // appended in later versions.
-export const SCAN_RUNS_HEADER = 'timestamp\tstatus\tcompanies\tboards\tfound\tfiltered_title\tfiltered_tier\tfiltered_location\tfiltered_posting_age\tfiltered_salary\tfiltered_content\tfiltered_cooldown\tdupes\tnew_added\terrors\tfiltered_blacklist\tfiltered_visa\tfiltered_posted_date\tfiltered_country_eligibility\n';
+export const SCAN_RUNS_HEADER = 'timestamp\tstatus\tcompanies\tboards\tfound\tfiltered_title\tfiltered_tier\tfiltered_location\tfiltered_posting_age\tfiltered_salary\tfiltered_content\tfiltered_cooldown\tdupes\tnew_added\terrors\tfiltered_blacklist\tfiltered_visa\tfiltered_posted_date\tfiltered_country_eligibility\tfiltered_notion\n';
 
 // Failure-path writes (#2643). main() registers a snapshot closure once the
 // sweep's counters exist (never on --dry-run, never before the sweep starts —
@@ -2537,6 +2537,8 @@ export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
     c.filteredPostedDate ?? 0,
     // filtered_country_eligibility (#2093) appended at the END for the same reason.
     c.filteredCountryEligibility ?? 0,
+    // filtered_notion (Notion already-applied gate) appended at the END.
+    c.filteredNotion ?? 0,
   ].join('\t') + '\n';
   appendFileSync(filePath, row, 'utf-8');
 }
@@ -2987,6 +2989,24 @@ async function main() {
   const seenCompanyRoles = dedupSnapshot.seenCompanyRoles;
   const seenCompanyRoleBases = dedupSnapshot.seenCompanyRoleBases ?? new Set();
 
+  // 4.5 Notion already-applied gate (opt-in via credentials / portals.yml).
+  // Loads URLs + company+role keys from the user's Notion Applications DB
+  // (VOYAGER-logged completed applications). Matched postings are filtered
+  // below with a dedicated counter (not folded into "dupes").
+  let notionAppliedSets = { urls: new Set(), companyRoles: new Set(), active: false };
+  let totalFilteredNotion = 0;
+  try {
+    const { loadNotionAppliedSets } = await import('./notion-applied.mjs');
+    notionAppliedSets = await loadNotionAppliedSets(config, { log: console.log });
+    if (notionAppliedSets.active) {
+      console.log(
+        `Notion applied gate: ${notionAppliedSets.urls.size} URLs, ${notionAppliedSets.companyRoles.size} company+role keys`,
+      );
+    }
+  } catch (e) {
+    console.log(`Notion applied gate unavailable (${e.message}) — continuing without it.`);
+  }
+
   // 5. Fetch from each target
   // LOCAL day. This one value does two things that both care which day it is:
   // it is the `today` buildCooldownFilter compares against, and it is the
@@ -3032,6 +3052,7 @@ async function main() {
       errors: errors.length, filteredBlacklist: totalFilteredBlacklist,
       filteredVisa: totalFilteredVisa, filteredPostedDate: totalFilteredPostedDate,
       filteredCountryEligibility: totalFilteredCountryEligibility,
+      filteredNotion: totalFilteredNotion,
     }));
     // Ctrl-C mid-sweep is the common abort. Best effort: record, then die
     // with the conventional SIGINT code.
@@ -3152,6 +3173,16 @@ async function main() {
         if (!visaFilter(job.description)) {
           totalFilteredVisa++;
           continue;
+        }
+        // Notion already-applied (URL or company+role) — before local dedup so
+        // the counter is distinct from scan-history/pipeline dupes.
+        if (notionAppliedSets.active) {
+          const nUrl = normalizeUrlForDedup(job.url);
+          const nCr = `${String(job.company || '').trim().toLowerCase()}::${String(job.title || '').trim().toLowerCase()}`;
+          if (notionAppliedSets.urls.has(nUrl) || (nCr !== '::' && notionAppliedSets.companyRoles.has(nCr))) {
+            totalFilteredNotion++;
+            continue;
+          }
         }
         const dedupUrl = normalizeUrlForDedup(job.url);
         if (seenUrls.has(dedupUrl)) {
@@ -3363,6 +3394,9 @@ async function main() {
   if (Object.keys(windows).length > 0 || totalFilteredCooldown > 0) {
     console.log(`Filtered by cooldown:  ${totalFilteredCooldown} removed`);
   }
+  if (notionAppliedSets.active || totalFilteredNotion > 0) {
+    console.log(`Filtered by Notion:    ${totalFilteredNotion} already applied`);
+  }
   console.log(`Duplicates:            ${totalDupes} skipped`);
   if (blacklist.size > 0) {
     if (includeBlacklisted) {
@@ -3528,6 +3562,7 @@ async function main() {
       filteredVisa: totalFilteredVisa,
       filteredPostedDate: totalFilteredPostedDate,
       filteredCountryEligibility: totalFilteredCountryEligibility,
+      filteredNotion: totalFilteredNotion,
     });
   }
   // The run completed (or was a dry run) — disarm the failure row.
@@ -3540,7 +3575,7 @@ async function main() {
     const filtered = totalFilteredTitle + totalFilteredTier + totalFilteredLocation
       + totalFilteredPostingAge + totalFilteredPostedDate + totalFilteredSalary
       + totalFilteredContent + totalFilteredCountryEligibility + totalFilteredBlacklist
-      + totalFilteredVisa + totalFilteredCooldown;
+      + totalFilteredVisa + totalFilteredCooldown + totalFilteredNotion;
     emitJsonReceipt({
       version: 'careerops.scan.receipt@1',
       date,
