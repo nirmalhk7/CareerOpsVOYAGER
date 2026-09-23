@@ -2,7 +2,6 @@ package screens
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -39,15 +38,26 @@ type PipelineOpenPDFMsg struct {
 	Path string
 }
 
-// PipelineGeneratePDFMsg requests a PDF regeneration via generate-pdf.mjs
-// from the application's recorded source HTML. Paths are relative to
-// CareerOpsPath (as recorded in the manifest).
+// PipelineOpenDocumentsMsg is emitted when the paired VOYAGER resume and
+// cover letter should both be opened with their OS default handlers.
+type PipelineOpenDocumentsMsg struct {
+	Paths []string
+}
+
+// PipelineOpenFolderMsg is emitted when the application artifact folder that
+// contains the VOYAGER resume and cover letter should be opened.
+type PipelineOpenFolderMsg struct {
+	Path string
+}
+
+// PipelineGeneratePDFMsg requests a PDF regeneration via integrations/voyager/build.mjs
+// from the application's generated VOYAGER TeX and bundle-local class. Paths
+// are relative to CareerOpsPath.
 type PipelineGeneratePDFMsg struct {
 	CareerOpsPath string
-	ReportNumber  string
-	HTMLPath      string
+	TexPath       string
 	PDFPath       string
-	Format        string
+	ClassPath     string
 }
 
 // PipelinePDFGeneratedMsg reports the outcome of a regeneration. On success
@@ -567,7 +577,7 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 		m.cursor = 0
 		m.scrollOffset = 0
 
-	case "f", "right", "l":
+	case "right", "l":
 		m.activeTab++
 		if m.activeTab >= len(getPipelineTabs()) {
 			m.activeTab = 0
@@ -620,6 +630,13 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 
 	case "d":
 		if app, ok := m.CurrentApp(); ok {
+			if resume, cover, _, found := data.ResolveVoyagerDocuments(m.careerOpsPath, app); found {
+				paths := []string{
+					filepath.Join(m.careerOpsPath, filepath.FromSlash(resume)),
+					filepath.Join(m.careerOpsPath, filepath.FromSlash(cover)),
+				}
+				return m, func() tea.Msg { return PipelineOpenDocumentsMsg{Paths: paths} }
+			}
 			manifest := data.LoadPDFManifest(m.careerOpsPath)
 			candidates := data.ResolvePDFs(m.careerOpsPath, app, manifest)
 			if len(candidates) == 0 {
@@ -629,41 +646,30 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 			}
 		}
 
+	case "f":
+		if app, ok := m.CurrentApp(); ok {
+			if _, _, folder, found := data.ResolveVoyagerDocuments(m.careerOpsPath, app); found {
+				path := filepath.Join(m.careerOpsPath, filepath.FromSlash(folder))
+				return m, func() tea.Msg { return PipelineOpenFolderMsg{Path: path} }
+			}
+			m.flash = "No paired Voyager resume and cover letter found for this application"
+		}
+
 	case "D":
 		if app, ok := m.CurrentApp(); ok {
-			manifest := data.LoadPDFManifest(m.careerOpsPath)
-			entry, found := manifest.Lookup(app)
-			// Manifest lookup requires a report number; fall back to PDF-path
-			// index when the manifest was written without --report (common case).
-			if !found || entry.HTMLPath == "" {
-				byPath := data.LoadPDFEntriesByPath(m.careerOpsPath)
-				candidates := data.ResolvePDFs(m.careerOpsPath, app, manifest)
-				for _, c := range candidates {
-					if e, ok := byPath[c]; ok && e.HTMLPath != "" {
-						entry = e
-						found = true
-						break
-					}
-				}
-			}
-			if !found || entry.HTMLPath == "" {
-				m.flash = "No source HTML found for this application — run /career-ops pdf first"
+			tex, pdf, class, found := data.ResolveVoyagerResumeSource(m.careerOpsPath, app)
+			if !found {
+				m.flash = "No Voyager resume TeX found for this application — run /career-ops pdf first"
 				return m, nil
 			}
-			if _, err := os.Stat(filepath.Join(m.careerOpsPath, filepath.FromSlash(entry.HTMLPath))); err != nil {
-				m.flash = "Source HTML missing: " + entry.HTMLPath
-				return m, nil
-			}
-			m.flash = "Regenerating PDF via generate-pdf.mjs — this takes a few seconds..."
-			path, report := m.careerOpsPath, entry.ReportNumber
-			html, pdf, format := entry.HTMLPath, entry.PDFPath, entry.Format
+			m.flash = "Regenerating PDF via Voyager renderer — this takes a few seconds..."
+			path := m.careerOpsPath
 			return m, func() tea.Msg {
 				return PipelineGeneratePDFMsg{
 					CareerOpsPath: path,
-					ReportNumber:  report,
-					HTMLPath:      html,
+					TexPath:       tex,
 					PDFPath:       pdf,
-					Format:        format,
+					ClassPath:     class,
 				}
 			}
 		}
@@ -2004,6 +2010,7 @@ func (m PipelineModel) renderHelp() string {
 		keyStyle.Render("o") + descStyle.Render(i18n.Current.HelpOpenURL) +
 		keyStyle.Render("d") + descStyle.Render(i18n.Current.HelpOpenPDF) +
 		keyStyle.Render("D") + descStyle.Render(i18n.Current.HelpRegenPDF) +
+		keyStyle.Render("f") + descStyle.Render(i18n.Current.HelpOpenFolder) +
 		keyStyle.Render("c") + descStyle.Render(i18n.Current.HelpChange) +
 		keyStyle.Render("C") + descStyle.Render(i18n.Current.HelpColumns) +
 		keyStyle.Render("v") + descStyle.Render(i18n.Current.HelpView) +

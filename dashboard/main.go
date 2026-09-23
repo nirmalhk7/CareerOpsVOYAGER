@@ -224,6 +224,16 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case screens.PipelineOpenPDFMsg:
 		return m, openCmd(msg.Path)
 
+	case screens.PipelineOpenDocumentsMsg:
+		cmds := make([]tea.Cmd, 0, len(msg.Paths))
+		for _, path := range msg.Paths {
+			cmds = append(cmds, openCmd(path))
+		}
+		return m, tea.Batch(cmds...)
+
+	case screens.PipelineOpenFolderMsg:
+		return m, openCmd(msg.Path)
+
 	case screens.PipelineGeneratePDFMsg:
 		return m, runGeneratePDF(msg)
 
@@ -260,20 +270,19 @@ func openCmd(target string) tea.Cmd {
 	}
 }
 
-// runGeneratePDF shells out to node generate-pdf.mjs in the career-ops root,
+// voyagerPDFArgs produces the integrations/voyager/build.mjs invocation for a generated
+// VOYAGER TeX source and the exact class copied into its application bundle.
+func voyagerPDFArgs(msg screens.PipelineGeneratePDFMsg) []string {
+	return []string{"integrations/voyager/build.mjs", msg.TexPath, msg.PDFPath, "--class", msg.ClassPath}
+}
+
+// runGeneratePDF shells out to node integrations/voyager/build.mjs in the career-ops root,
 // opens the resulting PDF on success, and reports the outcome back to the
 // pipeline screen as a PipelinePDFGeneratedMsg. Runs in a tea.Cmd goroutine,
-// so the UI stays responsive while Chromium renders.
+// so the UI stays responsive while LaTeX compiles.
 func runGeneratePDF(msg screens.PipelineGeneratePDFMsg) tea.Cmd {
 	return func() tea.Msg {
-		args := []string{"generate-pdf.mjs", msg.HTMLPath, msg.PDFPath}
-		if msg.Format != "" {
-			args = append(args, "--format="+msg.Format)
-		}
-		if msg.ReportNumber != "" {
-			args = append(args, "--report="+msg.ReportNumber)
-		}
-		cmd := exec.Command("node", args...)
+		cmd := exec.Command("node", voyagerPDFArgs(msg)...)
 		cmd.Dir = msg.CareerOpsPath
 		out, err := cmd.CombinedOutput()
 		if err != nil {

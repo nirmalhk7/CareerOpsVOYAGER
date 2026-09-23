@@ -87,6 +87,62 @@ func TestPDFKeyOpensSingleMatchDirectly(t *testing.T) {
 	}
 }
 
+func TestPDFKeyOpensVoyagerResumeAndCoverLetter(t *testing.T) {
+	root := t.TempDir()
+	writePDFFixture(t, root, "output/001-globex-engineer/cv/tailored/v001/cv.pdf")
+	writePDFFixture(t, root, "output/001-globex-engineer/cover/tailored/v001/cover.pdf")
+	apps := []model.CareerApplication{
+		{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0, ReportNumber: "001"},
+	}
+
+	pm := newPDFTestModel(t, root, apps)
+	_, cmd := pm.Update(keyMsg("d"))
+
+	if cmd == nil {
+		t.Fatal("expected an open command for the Voyager documents")
+	}
+	msg, ok := cmd().(PipelineOpenDocumentsMsg)
+	if !ok {
+		t.Fatalf("expected PipelineOpenDocumentsMsg, got %T", cmd())
+	}
+	want := []string{
+		filepath.Join(root, "output", "001-globex-engineer", "cv", "tailored", "v001", "cv.pdf"),
+		filepath.Join(root, "output", "001-globex-engineer", "cover", "tailored", "v001", "cover.pdf"),
+	}
+	if len(msg.Paths) != len(want) {
+		t.Fatalf("document paths = %#v, want %#v", msg.Paths, want)
+	}
+	for i := range want {
+		if msg.Paths[i] != want[i] {
+			t.Fatalf("document path %d = %q, want %q", i, msg.Paths[i], want[i])
+		}
+	}
+}
+
+func TestFolderKeyOpensVoyagerDocumentFolder(t *testing.T) {
+	root := t.TempDir()
+	writePDFFixture(t, root, "output/001-globex-engineer/cv/tailored/v001/cv.pdf")
+	writePDFFixture(t, root, "output/001-globex-engineer/cover/tailored/v001/cover.pdf")
+	apps := []model.CareerApplication{
+		{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0, ReportNumber: "001"},
+	}
+
+	pm := newPDFTestModel(t, root, apps)
+	_, cmd := pm.Update(keyMsg("f"))
+
+	if cmd == nil {
+		t.Fatal("expected an open command for the Voyager document folder")
+	}
+	msg, ok := cmd().(PipelineOpenFolderMsg)
+	if !ok {
+		t.Fatalf("expected PipelineOpenFolderMsg, got %T", cmd())
+	}
+	want := filepath.Join(root, "output", "001-globex-engineer")
+	if msg.Path != want {
+		t.Fatalf("folder = %q, want %q", msg.Path, want)
+	}
+}
+
 func TestPDFKeyOpensNewestForMultipleMatches(t *testing.T) {
 	root := t.TempDir()
 	// Write two PDFs for the same company with distinct dates so ordering is predictable.
@@ -133,7 +189,7 @@ func TestPDFKeyDoesNotOpenCompanyPrefixMatch(t *testing.T) {
 	}
 }
 
-func TestRegenerateKeyFlashesWithoutManifestEntry(t *testing.T) {
+func TestRegenerateKeyFlashesWithoutVoyagerTex(t *testing.T) {
 	root := t.TempDir()
 	apps := []model.CareerApplication{
 		{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0, ReportNumber: "001"},
@@ -143,24 +199,17 @@ func TestRegenerateKeyFlashesWithoutManifestEntry(t *testing.T) {
 	updated, cmd := pm.Update(keyMsg("D"))
 
 	if cmd != nil {
-		t.Fatal("expected no command without a manifest entry")
+		t.Fatal("expected no command without a Voyager TeX source")
 	}
 	if updated.flash == "" {
-		t.Fatal("expected a flash notice without a manifest entry")
+		t.Fatal("expected a flash notice without a Voyager TeX source")
 	}
 }
 
 func TestRegenerateKeyDoesNotUseCompanyPrefixMatch(t *testing.T) {
 	root := t.TempDir()
-	pdfPath := "output/cv-jane-doe-metabase-2026-06-05.pdf"
-	htmlPath := "output/cv-jane-doe-metabase-2026-06-05.html"
-	writePDFFixture(t, root, pdfPath)
-	writePDFFixture(t, root, htmlPath)
-	writePDFFixture(t, root, "data/pdf-index.tsv")
-	manifest := "\t" + pdfPath + "\t" + htmlPath + "\tletter\t2026-06-05\n"
-	if err := os.WriteFile(filepath.Join(root, "data", "pdf-index.tsv"), []byte(manifest), 0o644); err != nil {
-		t.Fatalf("write manifest: %v", err)
-	}
+	writePDFFixture(t, root, "output/001-metabase-engineer/cv/tailored/v001/cv.tex")
+	writePDFFixture(t, root, "output/001-metabase-engineer/documents/style.cls")
 	apps := []model.CareerApplication{
 		{Company: "Meta", Role: "Engineer", Status: "Evaluated", Score: 4.0},
 	}
@@ -176,14 +225,10 @@ func TestRegenerateKeyDoesNotUseCompanyPrefixMatch(t *testing.T) {
 	}
 }
 
-func TestRegenerateKeyEmitsGenerateMsgFromManifest(t *testing.T) {
+func TestRegenerateKeyEmitsGenerateMsgFromVoyagerTex(t *testing.T) {
 	root := t.TempDir()
-	writePDFFixture(t, root, "output/cv-jane-doe-globex.html")
-	writePDFFixture(t, root, "data/pdf-index.tsv") // placeholder, overwritten below
-	manifest := "001\toutput/cv-jane-doe-globex-2026-06-05.pdf\toutput/cv-jane-doe-globex.html\tletter\t2026-06-05\n"
-	if err := os.WriteFile(filepath.Join(root, "data", "pdf-index.tsv"), []byte(manifest), 0o644); err != nil {
-		t.Fatalf("write manifest: %v", err)
-	}
+	writePDFFixture(t, root, "output/001-globex-engineer/cv/tailored/v001/cv.tex")
+	writePDFFixture(t, root, "output/001-globex-engineer/documents/style.cls")
 	apps := []model.CareerApplication{
 		{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0, ReportNumber: "001"},
 	}
@@ -201,7 +246,9 @@ func TestRegenerateKeyEmitsGenerateMsgFromManifest(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected PipelineGeneratePDFMsg, got %T", cmd())
 	}
-	if msg.ReportNumber != "001" || msg.HTMLPath != "output/cv-jane-doe-globex.html" || msg.Format != "letter" {
+	if msg.TexPath != "output/001-globex-engineer/cv/tailored/v001/cv.tex" ||
+		msg.PDFPath != "output/001-globex-engineer/cv/tailored/v001/cv.pdf" ||
+		msg.ClassPath != "output/001-globex-engineer/documents/style.cls" {
 		t.Fatalf("unexpected generate request: %+v", msg)
 	}
 

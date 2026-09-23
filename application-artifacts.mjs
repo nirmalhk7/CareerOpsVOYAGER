@@ -53,9 +53,25 @@ export function applicationArtifactPaths({ reportNum, company, role, version = 1
       tailored: {
         root: tailoredRoot,
         html: join(tailoredRoot, 'cv.html'),
+        tex: join(tailoredRoot, 'cv.tex'),
         pdf: join(tailoredRoot, 'cv.pdf'),
         changes: join(tailoredRoot, 'changes.md'),
       },
+    },
+    cover: {
+      tailored: {
+        root: join(applicationRoot, 'cover', 'tailored', `v${String(version).padStart(3, '0')}`),
+        tex: join(applicationRoot, 'cover', 'tailored', `v${String(version).padStart(3, '0')}`, 'cover.tex'),
+        pdf: join(applicationRoot, 'cover', 'tailored', `v${String(version).padStart(3, '0')}`, 'cover.pdf'),
+        changes: join(applicationRoot, 'cover', 'tailored', `v${String(version).padStart(3, '0')}`, 'changes.md'),
+      },
+    },
+    documents: {
+      root: join(applicationRoot, 'documents'),
+      draft: join(applicationRoot, 'documents', 'draft.json'),
+      manifest: join(applicationRoot, 'documents', 'manifest.json'),
+      style: join(applicationRoot, 'documents', 'style.cls'),
+      evidenceVerification: join(applicationRoot, 'documents', 'evidence-verification.json'),
     },
     decision: {
       reuse: join(applicationRoot, 'decision', 'reuse.json'),
@@ -69,6 +85,8 @@ export function ensureApplicationArtifactDirs(paths) {
     join(paths.root, 'jd'),
     join(paths.root, 'cv', 'source'),
     paths.cv.tailored.root,
+    paths.cover.tailored.root,
+    paths.documents.root,
     join(paths.root, 'decision'),
   ]) mkdirSync(directory, { recursive: true });
   return paths;

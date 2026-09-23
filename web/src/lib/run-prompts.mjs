@@ -8,7 +8,7 @@
  * so a web evaluation is byte-identical to a CLI one (single source of truth, no
  * drift). kind "research" stays read-only.
  */
-import { CV_ENVELOPE_INSTRUCTION } from "./cv-envelope.mjs";
+import { VOYAGER_DRAFT_INSTRUCTION } from "./voyager-draft.mjs";
 
 /**
  * Is this company name safe to interpolate into a shell command inside a prompt?
@@ -88,10 +88,10 @@ Target: ${input}`;
     return `You are tailoring the user's ATS-optimized CV for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode's CONTENT step: follow modes/pdf.md's TAILORING rules exactly (do not improvise your own scoring or format). Apply its CONTENT rules — keyword injection, ordering, the competency grid, project selection, and its never-invent-a-skill rule. Its steps that shell out (the jd-skill-gap.mjs check, template resolution) and its build/save/render steps are NOT performed on web runs; the platform handles output itself.
 1. Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at reports/${input}-*.md (for the JD keywords + analysis).
 2. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary.
-3. Fill templates/cv-template.html's {{...}} placeholders with the tailored content. Use that template even though modes/pdf.md resolves one via cv-templates.mjs: web runs always use the base template. ${CV_ENVELOPE_INSTRUCTION}
-4. Emit the envelope EXACTLY ONCE. The platform writes the HTML, renders the PDF, and updates the tracker's PDF column itself, only after a confirmed successful render. Do not submit anything anywhere.
+3. Build the structured Voyager field map described by modes/pdf.md: candidate, variant, headline, evidence mappings, cv sections, and cover letter. ${VOYAGER_DRAFT_INSTRUCTION}
+4. Emit the envelope EXACTLY ONCE. The platform writes the draft, renders both PDFs through the Voyager builder, and updates the tracker's PDF column only after a confirmed successful render. Do not submit anything anywhere.
 
-After the envelope, end with EXACTLY one final line: VERDICT: {5 if the complete HTML envelope was emitted, else 1}/5 — {a one-line summary, ≤12 words}`;
+After the envelope, end with EXACTLY one final line: VERDICT: {5 if the complete Voyager draft was emitted, else 1}/5 — {a one-line summary, ≤12 words}`;
   }
   if (kind === "fix-portal") {
     return `A company's job-portal ATS slug is BROKEN — career-ops can no longer scan it, so it silently disappears from every future scan. Repair it (headless, on the user's machine):
@@ -194,4 +194,3 @@ VERDICT: {score}/5 — {reason in 12 words or fewer}
 
 Posting URL: ${input}`;
 }
-

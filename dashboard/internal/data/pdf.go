@@ -1,6 +1,7 @@
 package data
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -206,6 +207,97 @@ func ResolvePDFs(careerOpsPath string, app model.CareerApplication, manifest PDF
 
 	sortPDFsNewestFirst(careerOpsPath, matches)
 	return matches
+}
+
+// ResolveVoyagerDocuments finds the latest complete paired document set for
+// an application. VOYAGER keeps resume and cover-letter PDFs in one stable
+// application bundle under output/{report}-{company}-{role}/. A version is
+// usable only when both PDFs exist, so the dashboard never opens a mismatched
+// resume and cover letter.
+//
+// Returned paths are relative to careerOpsPath. The final return value is the
+// paired documents' shared bundle directory.
+func ResolveVoyagerDocuments(careerOpsPath string, app model.CareerApplication) (resumePath, coverPath, folderPath string, found bool) {
+	reportNumber := strings.TrimSpace(app.ReportNumber)
+	if reportNumber == "" && app.Number > 0 {
+		reportNumber = strconv.Itoa(app.Number)
+	}
+	report, err := strconv.Atoi(reportNumber)
+	if err != nil || report < 0 {
+		return "", "", "", false
+	}
+	company, role := kebabCase(app.Company), kebabCase(app.Role)
+	if company == "" || role == "" {
+		return "", "", "", false
+	}
+
+	bundleName := fmt.Sprintf("%03d-%s-%s", report, company, role)
+	bundlePath := filepath.Join(careerOpsPath, "output", bundleName)
+	resumeMatches, err := filepath.Glob(filepath.Join(bundlePath, "cv", "tailored", "v*", "cv.pdf"))
+	if err != nil {
+		return "", "", "", false
+	}
+	sort.Slice(resumeMatches, func(i, j int) bool {
+		return filepath.Base(filepath.Dir(resumeMatches[i])) > filepath.Base(filepath.Dir(resumeMatches[j]))
+	})
+
+	for _, resume := range resumeMatches {
+		version := filepath.Base(filepath.Dir(resume))
+		cover := filepath.Join(bundlePath, "cover", "tailored", version, "cover.pdf")
+		if _, err := os.Stat(cover); err != nil {
+			continue
+		}
+		resumeRel, resumeErr := filepath.Rel(careerOpsPath, resume)
+		coverRel, coverErr := filepath.Rel(careerOpsPath, cover)
+		folderRel, folderErr := filepath.Rel(careerOpsPath, bundlePath)
+		if resumeErr != nil || coverErr != nil || folderErr != nil {
+			continue
+		}
+		return filepath.ToSlash(resumeRel), filepath.ToSlash(coverRel), filepath.ToSlash(folderRel), true
+	}
+	return "", "", "", false
+}
+
+// ResolveVoyagerResumeSource finds the latest generated VOYAGER resume source
+// and its bundle-local class. It intentionally does not require a PDF: D is
+// the regeneration action and must recover a missing or stale resume PDF.
+// Returned paths are relative to careerOpsPath.
+func ResolveVoyagerResumeSource(careerOpsPath string, app model.CareerApplication) (texPath, pdfPath, classPath string, found bool) {
+	reportNumber := strings.TrimSpace(app.ReportNumber)
+	if reportNumber == "" && app.Number > 0 {
+		reportNumber = strconv.Itoa(app.Number)
+	}
+	report, err := strconv.Atoi(reportNumber)
+	if err != nil || report < 0 {
+		return "", "", "", false
+	}
+	company, role := kebabCase(app.Company), kebabCase(app.Role)
+	if company == "" || role == "" {
+		return "", "", "", false
+	}
+
+	bundleName := fmt.Sprintf("%03d-%s-%s", report, company, role)
+	bundlePath := filepath.Join(careerOpsPath, "output", bundleName)
+	class := filepath.Join(bundlePath, "documents", "style.cls")
+	if _, err := os.Stat(class); err != nil {
+		return "", "", "", false
+	}
+	matches, err := filepath.Glob(filepath.Join(bundlePath, "cv", "tailored", "v*", "cv.tex"))
+	if err != nil {
+		return "", "", "", false
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		return filepath.Base(filepath.Dir(matches[i])) > filepath.Base(filepath.Dir(matches[j]))
+	})
+	if len(matches) == 0 {
+		return "", "", "", false
+	}
+	texRel, texErr := filepath.Rel(careerOpsPath, matches[0])
+	classRel, classErr := filepath.Rel(careerOpsPath, class)
+	if texErr != nil || classErr != nil {
+		return "", "", "", false
+	}
+	return filepath.ToSlash(texRel), strings.TrimSuffix(filepath.ToSlash(texRel), ".tex") + ".pdf", filepath.ToSlash(classRel), true
 }
 
 // matchesCompanySlug reports whether a generated CV filename contains the

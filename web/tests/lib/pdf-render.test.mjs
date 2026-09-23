@@ -19,6 +19,8 @@ import {
   markTrackerReady,
   cleanupPdfScratch,
   renderAndMarkPdf,
+  writeVoyagerDraft,
+  spawnGenerateDocuments,
 } from "../../src/lib/pdf-render.mjs";
 
 // A fake child_process.spawn() result: stdout/stderr emit "data" once, then
@@ -477,4 +479,31 @@ test("writeCvHtml: a shorter re-render leaves no trailing bytes", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("writeVoyagerDraft: backend paths override agent-controlled paths", () => {
+  const dir = makeScratchDir();
+  const paths = {
+    draft: join(dir, "documents", "draft.web.json"),
+    cvTex: join(dir, "cv.tex"), coverTex: join(dir, "cover.tex"),
+    style: join(dir, "style.cls"), manifest: join(dir, "manifest.json"),
+    report: { number: "018", company: "Acme", role: "Platform Engineer", url: "https://jobs.example/18" },
+  };
+  try {
+    const result = writeVoyagerDraft({ pdfPaths: paths, draft: { report: { url: "https://attacker.example" }, paths: { cv_tex: "/unsafe.tex" }, candidate: { name: "Jane" } } });
+    const saved = JSON.parse(readFileSync(paths.draft, "utf8"));
+    assert.equal(result.ok, true);
+    assert.equal(saved.paths.cv_tex, paths.cvTex);
+    assert.equal(saved.report.company, "Acme");
+    assert.equal(saved.report.url, "https://jobs.example/18");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("spawnGenerateDocuments: invokes the paired Voyager renderer", async () => {
+  const calls = [];
+  const spawnFn = (execPath, args, opts) => { calls.push({ execPath, args, opts }); return fakeChild({ exitCode: 0 }); };
+  const result = await spawnGenerateDocuments({ spawnFn, execPath: "node", root: "/root", draftPath: "/root/output/018/documents/draft.web.json" });
+  assert.deepEqual(result, { ok: true, stderr: "" });
+  assert.deepEqual(calls[0].args.slice(1), ["render", "--draft", "/root/output/018/documents/draft.web.json", "--approved"]);
+  assert.match(calls[0].args[0], /integrations\/voyager\/generate-documents\.mjs$/);
 });

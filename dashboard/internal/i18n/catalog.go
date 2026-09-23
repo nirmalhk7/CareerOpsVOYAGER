@@ -127,6 +127,7 @@ type Catalog struct {
 	HelpOpenURL    string
 	HelpOpenPDF    string
 	HelpRegenPDF   string
+	HelpOpenFolder string
 	HelpChange     string
 	HelpColumns    string
 	HelpView       string
@@ -400,8 +401,9 @@ var En = Catalog{
 	HelpRefresh:    " refresh  ",
 	HelpReport:     " report  ",
 	HelpOpenURL:    " open URL  ",
-	HelpOpenPDF:    " open PDF  ",
-	HelpRegenPDF:   " regen PDF  ",
+	HelpOpenPDF:    " open docs  ",
+	HelpRegenPDF:   " regen Voyager PDF  ",
+	HelpOpenFolder: " open folder  ",
 	HelpChange:     " change  ",
 	HelpColumns:    " columns  ",
 	HelpView:       " view  ",
@@ -566,6 +568,7 @@ var Tr = Catalog{
 	HelpOpenURL:    " URL aç  ",
 	HelpOpenPDF:    " PDF'i aç  ",
 	HelpRegenPDF:   " PDF üret  ",
+	HelpOpenFolder: " klasörü aç  ",
 	HelpChange:     " durum  ",
 	HelpColumns:    " sütunlar  ",
 	HelpView:       " görünüm  ",
@@ -730,6 +733,7 @@ var Es = Catalog{
 	HelpOpenURL:    " abrir URL  ",
 	HelpOpenPDF:    " abrir PDF  ",
 	HelpRegenPDF:   " regenerar PDF  ",
+	HelpOpenFolder: " abrir carpeta  ",
 	HelpChange:     " cambiar  ",
 	HelpColumns:    " columnas  ",
 	HelpView:       " vista  ",

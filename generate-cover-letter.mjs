@@ -6,21 +6,22 @@
  *   node generate-cover-letter.mjs --payload payload.json
  *   node generate-cover-letter.mjs --payload payload.json --out output/slug-cover.pdf
  *
- * Fills templates/cover-letter-template.html with the payload, then renders
- * it to PDF via the same Playwright pipeline used for CVs (generate-pdf.mjs).
+ * Renders the payload as VOYAGER TeX, then compiles it through the shared
+ * integrations/voyager/build.mjs entrypoint. `buildHtml` remains a non-PDF preview helper
+ * for existing custom-template validation.
  *
  * `buildHtml` and `safeOutputPath` are exported as pure functions so the
- * template and --out path guard can be tested without loading Playwright
- * (renderHtmlToPdf is imported lazily inside main).
+ * template and --out path guard can be tested without compiling LaTeX.
  */
 
-import { readFileSync, existsSync, mkdirSync } from "fs";
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from "fs";
 import { dirname, resolve, join, relative, isAbsolute } from "path";
 import { fileURLToPath } from "url";
 import { parseArgs } from "util";
 import { assertFacts } from "./verify-cv-facts.mjs";
 import { resolveTemplate } from "./cv-templates.mjs";
 import { isMainModule } from "./lib/is-main-module.mjs";
+import { escapeLatex, sanitizeUrl } from "./lib/latex-escape.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUTPUT_ROOT = resolve(__dirname, "output");
@@ -29,7 +30,7 @@ const OUTPUT_ROOT = resolve(__dirname, "output");
  * Resolve a requested cover-letter output path.
  *
  * Paths that stay inside `output/` keep their relative subdirectory (the
- * application-bundle layout `generate-pdf.mjs` already supports). Paths that
+ * application-bundle layout integrations/voyager/build.mjs supports). Paths that
  * would escape `output/` — `..` traversal or an absolute path outside it —
  * are rejected instead of being silently flattened to `output/<basename>`.
  *
@@ -266,14 +267,75 @@ export function buildHtml(payload, templatePath) {
   return rendered;
 }
 
+function latexText(value) {
+  return escapeLatex(String(value || "").trim());
+}
+
+function latexLink(url, label) {
+  const safeUrl = sanitizeUrl(String(url || "").trim());
+  const safeLabel = latexText(label);
+  return safeUrl && safeLabel ? `\\candidateLink{${safeUrl}}{${safeLabel}}` : "";
+}
+
+function coverParagraphs(letter) {
+  const achievements = (letter.achievements || [])
+    .map((item) => [item?.lead, item?.impact].filter(Boolean).join(", "))
+    .filter(Boolean);
+  return [
+    letter.opening,
+    letter.profile_intro,
+    ...achievements,
+    letter.problems_section,
+    letter.closing,
+    letter.language_closing,
+  ].filter(Boolean).map(latexText).join("\n\n");
+}
+
+/**
+ * Render a standalone cover-letter payload into the user's VOYAGER TeX
+ * contract. PDF generation must compile this source through build-voyager;
+ * the older HTML template remains a non-PDF preview helper only.
+ */
+export function renderVoyagerCoverTex(payload) {
+  _require(payload, ["candidate", "letter"], "payload");
+  const candidate = payload.candidate;
+  const letter = payload.letter;
+  _require(candidate, ["name"], "candidate");
+  _require(letter, ["role_title", "opening", "profile_intro"], "letter");
+
+  const profileLinks = [
+    candidate.linkedin && latexLink(asUrl(candidate.linkedin), candidate.linkedin.replace(/^https?:\/\//i, "")),
+    candidate.github && latexLink(asUrl(candidate.github), candidate.github.replace(/^https?:\/\//i, "")),
+  ].filter(Boolean).join(" \\\\ ");
+  const contact = [
+    candidate.location && latexText(candidate.location),
+    candidate.phone && latexText(candidate.phone),
+    candidate.email && latexLink(`mailto:${candidate.email}`, candidate.email),
+  ].filter(Boolean).join(" \\\\ ");
+  // style.cls owns the "Dear … Hiring Team," wrapper. Its macro argument is
+  // only the company name, not a fully written salutation.
+  const greetingTarget = letter.company || "the";
+  const signature = typeof letter.signature === "object" ? letter.signature.name : "";
+  return `\\documentclass[coverletter]{style}
+\\candidateName{${latexText(candidate.name)}}
+\\profileLinks{${profileLinks}}
+\\contactInfo{${contact}}
+\\begin{document}
+\\coverLetterDate
+\\coverLetterGreeting{${latexText(greetingTarget)}}
+\\coverLetterSubject{${latexText(letter.role_title)}}
+${coverParagraphs(letter)}
+\\coverLetterSignature{${latexText(signature || candidate.email || candidate.name)}}
+\\end{document}
+`;
+}
+
 /** Parse a payload, run the fact gate, and render the cover-letter PDF. */
 async function main() {
   const { values: args } = parseArgs({
     options: {
       payload: { type: "string" },
       out:     { type: "string" },
-      format:  { type: "string" },
-      report:  { type: "string" },
       help:    { type: "boolean", short: "h" },
     },
     strict: false,
@@ -282,12 +344,10 @@ async function main() {
   if (args.help || !args.payload) {
     console.log(`
 Usage:
-  node generate-cover-letter.mjs --payload payload.json [--out output/path.pdf] [--format letter|a4] [--report NNN]
+  node generate-cover-letter.mjs --payload payload.json [--out output/path.pdf]
 
   --payload   Path to the JSON payload file (required)
   --out       Override output path from payload (optional)
-  --format    Override output PDF page format (letter|a4, default: a4)
-  --report    Link the PDF to a tracker report number in data/pdf-index.tsv
 `);
     process.exit(args.help ? 0 : 1);
   }
@@ -320,11 +380,18 @@ Usage:
   if (!existsSync(OUTPUT_ROOT)) mkdirSync(OUTPUT_ROOT, { recursive: true });
 
   try {
-    const html = buildHtml(payload);
+    const factText = [
+      payload.letter?.opening,
+      payload.letter?.profile_intro,
+      payload.letter?.problems_section,
+      payload.letter?.closing,
+      payload.letter?.language_closing,
+      ...(payload.letter?.achievements || []).flatMap((item) => [item?.lead, item?.impact]),
+    ].filter(Boolean).join("\n");
     // Cover letters are candidate-facing documents too. Reuse the CV fact
     // validator before importing Playwright or writing a PDF so a failed gate
     // cannot leave behind a misleading artifact.
-    const factCheck = assertFacts(html, { label: "cover letter" });
+    const factCheck = assertFacts(factText, { label: "cover letter" });
     // Ahead of the verdict, because it qualifies it: with no config the phrase
     // lists are empty, so a silent gate here covers metrics and facts only.
     if (factCheck.configMissing) {
@@ -336,15 +403,13 @@ Usage:
         console.error(`  - advisory phrase: ${phrase}`);
       }
     }
-    // Imported only after fact validation so a failed gate does not load
-    // Playwright or create a PDF artifact.
-    const { renderHtmlToPdf } = await import("./generate-pdf.mjs");
+    // Imported only after fact validation so a failed gate cannot create a PDF
+    // artifact. The central builder receives VOYAGER TeX and the original class.
+    const { compileVoyagerTex } = await import("./integrations/voyager/build.mjs");
     const outputPath = resolve(payload.output_path);
-    await renderHtmlToPdf(html, outputPath, {
-      format: args.format || "a4",
-      reportNum: args.report,
-      inputPath: payloadPath,
-    });
+    const texPath = outputPath.replace(/\.pdf$/i, ".tex");
+    writeFileSync(texPath, renderVoyagerCoverTex(payload), "utf8");
+    await compileVoyagerTex({ texPath, outputPath });
     console.log(`\nCover letter PDF: ${payload.output_path}`);
   } catch (err) {
     console.error("ERROR generating cover letter PDF:");

@@ -88,6 +88,49 @@ export function writeCvHtml({ pdfPaths, html }) {
   }
 }
 
+/** Persist an agent-authored document draft after overwriting backend-owned fields. */
+export function writeVoyagerDraft({ pdfPaths, draft }) {
+  try {
+    const hydrated = {
+      ...draft,
+      schema_version: 1,
+      report: pdfPaths.report,
+      paths: {
+        cv_tex: pdfPaths.cvTex,
+        cover_tex: pdfPaths.coverTex,
+        style: pdfPaths.style,
+        manifest: pdfPaths.manifest,
+      },
+    };
+    fs.mkdirSync(path.dirname(pdfPaths.draft), { recursive: true });
+    fs.writeFileSync(pdfPaths.draft, `${JSON.stringify(hydrated, null, 2)}\n`, "utf8");
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: `Could not save the Voyager draft to ${err.path ?? pdfPaths.draft}: ${err.message}` };
+  }
+}
+
+/** Run the paired renderer; it invokes the Voyager builder for both TeX files. */
+export function spawnGenerateDocuments({ spawnFn, execPath, root, draftPath }) {
+  return new Promise((resolve) => {
+    const child = spawnFn(execPath, [path.join(root, "integrations", "voyager", "generate-documents.mjs"), "render", "--draft", draftPath, "--approved"], { cwd: root });
+    let stderr = "";
+    child.stderr.on("data", (d) => { stderr += d.toString(); });
+    child.on("close", (code) => resolve({ ok: code === 0, stderr: stderr.trim() }));
+    child.on("error", (e) => resolve({ ok: false, stderr: `Voyager rendering failed to start: ${e.message}` }));
+  });
+}
+
+export async function renderAndMarkVoyager({ spawnFn, execPath, root, pdfPaths, reportNum }) {
+  const render = await spawnGenerateDocuments({ spawnFn, execPath, root, draftPath: pdfPaths.draft });
+  if (!render.ok) return { kind: "render-failed", error: render.stderr || "Voyager PDF rendering failed." };
+  const mark = await markTrackerReady({ spawnFn, execPath, root, reportNum });
+  if (!mark.ok) {
+    return { kind: "rendered", warnings: [`PDFs rendered, but the tracker wasn't updated: ${mark.data?.error ?? mark.stderr}`] };
+  }
+  return { kind: "rendered", warnings: [] };
+}
+
 /**
  * Spawn generate-pdf.mjs as a plain child process and resolve once it exits.
  * @param {{spawnFn: Function, execPath: string, root: string, html: string, finalPdf: string, format: "letter"|"a4", reportNum: string}} args
