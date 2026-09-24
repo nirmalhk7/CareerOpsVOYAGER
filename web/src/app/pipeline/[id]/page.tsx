@@ -2,11 +2,19 @@ import { notFound } from "next/navigation";
 import { readReport, findApplication, pdfReadyForReport, trackerCanDelete } from "@/lib/career-ops";
 import { resolveTailoredCover } from "@/lib/apply/cover";
 import { ReportView } from "@/components/report-view";
+import { pipelineReturnHref } from "@/lib/pipeline-navigation.mjs";
 
 export const dynamic = "force-dynamic";
 
-export default async function ReportPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ReportPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ from?: string }>;
+}) {
   const { id } = await params;
+  const { from } = await searchParams;
   const app = findApplication(id);
   const report = readReport(id);
   if (!app && !report) notFound();
@@ -25,6 +33,7 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
       canDelete={trackerCanDelete()}
       pdfReadyFromIndex={await pdfReadyForReport(id)}
       coverReady={coverReady}
+      backHref={pipelineReturnHref(from)}
     />
   );
 }

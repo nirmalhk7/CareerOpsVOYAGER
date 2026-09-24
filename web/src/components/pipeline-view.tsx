@@ -11,6 +11,7 @@ import { canonStatus, scoreNum, scoreTone, statusDot } from "@/lib/format";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
 import { cn } from "@/lib/cn";
 import { companyPresentation, companySearchText } from "@/lib/company-presentation.mjs";
+import { pipelineDetailHref } from "@/lib/pipeline-navigation.mjs";
 
 // INBOX (the triage queue) is the default tab; the rest filter the tracker.
 const TABS = [
@@ -220,16 +221,17 @@ export function PipelineView({
             <tbody className="divide-y divide-border">
               {filtered.map((r, i) => {
                 const company = companyPresentation(r);
+                const detailHref = pipelineDetailHref(r.n, params.toString());
                 return (
                   <tr key={`${r.n}-${i}`} className="group transition-colors hover:bg-surface/40">
                     <td className="px-4 py-3 font-medium">
-                      <Link href={`/pipeline/${r.n}`} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
+                      <Link href={detailHref} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
                         <CompanyLogo name={company.logoName} size={20} />
                         {company.label}
                       </Link>
                     </td>
                   <td className="px-4 py-3 text-muted">
-                    <Link href={`/pipeline/${r.n}`}>{r.role}</Link>
+                    <Link href={detailHref}>{r.role}</Link>
                   </td>
                   <td className="px-4 py-3">
                     <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
