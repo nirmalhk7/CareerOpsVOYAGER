@@ -8,7 +8,6 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import * as yaml from "js-yaml";
 
 /**
  * Lowercase, non-alphanumeric runs -> single hyphen, trimmed.
@@ -21,16 +20,18 @@ export function slugify(s) {
 
 /**
  * @typedef {Object} PdfPaths
- * @property {string} html - Where the backend writes the tailored HTML it parsed out of the agent's envelope (#2185).
- * @property {string} finalPdf - Where the backend renders the final PDF (output/cv-{candidate}-{company}-{date}.pdf).
+ * @property {string} draft - Where the backend writes the agent's structured Voyager draft.
+ * @property {string} cvTex - Bundle-local resume TeX source.
+ * @property {string} coverTex - Bundle-local cover-letter TeX source.
+ * @property {string} finalPdf - Bundle-local resume PDF.
+ * @property {string} coverPdf - Bundle-local cover-letter PDF.
+ * @property {string} style - Bundle-local copy of the user's VOYAGER class.
+ * @property {string} manifest - Paired-document generation manifest.
  */
 
 /**
- * Precompute the scratch HTML and final PDF paths for a
- * "pdf" run, so the agent never chooses its own filenames — the backend owns
- * naming, writing (#2185) and rendering. Resolves the report (for the company slug)
- * and config/profile.yml (for the candidate slug) — same naming convention
- * modes/pdf.md documents, so web and CLI output stay byte-identical.
+ * Precompute the paired Voyager bundle paths for a web "pdf" run. The backend
+ * owns naming, writing, and rendering; the agent never chooses a filesystem path.
  *
  * Framework-agnostic: returns a result instead of constructing a Response, so
  * the caller (a Next.js route today) decides how to surface `ok: false`.
@@ -60,29 +61,36 @@ export function resolvePdfPaths(input, today, root, findReportFile) {
   }
   const companyMatch = path.basename(reportFile).match(/^\d+-(.+)-\d{4}-\d{2}-\d{2}\.md$/);
   const companySlug = companyMatch ? companyMatch[1] : "company";
-  let candidateSlug = "candidate";
+  let roleSlug = "role";
+  let role = "Role";
+  let url = "";
   try {
-    // js-yaml v4's load() uses the safe default schema (no arbitrary type
-    // construction, unlike Python's PyYAML) — same pattern already used in
-    // web/src/app/api/profile/route.ts and portals/route.ts.
-    const profile = yaml.load(fs.readFileSync(path.join(root, "config", "profile.yml"), "utf8"));
-    if (profile?.candidate?.full_name) candidateSlug = slugify(profile.candidate.full_name);
-  } catch (err) {
-    // A missing profile.yml is expected (not every checkout has one yet) and
-    // falls back silently. Anything else — a real YAML syntax error in the
-    // user's own file — should not fail silently forever; it would otherwise
-    // produce a wrong-but-plausible-looking filename with zero signal.
-    if (err?.code !== "ENOENT") {
-      console.warn(`resolvePdfPaths: could not read/parse config/profile.yml, defaulting candidate slug: ${err.message}`);
+    const report = fs.readFileSync(reportFile, "utf8");
+    const foundRole = report.match(/^\*\*Role:\*\*\s*(.+)$/mi)?.[1]?.trim();
+    if (foundRole) {
+      role = foundRole;
+      roleSlug = slugify(role) || "role";
     }
+    url = report.match(/^\*\*URL:\*\*\s*(https?:\/\/\S+)/mi)?.[1] ?? "";
+  } catch (err) {
+    if (err?.code !== "ENOENT") console.warn(`resolvePdfPaths: could not read report role, defaulting to role: ${err.message}`);
   }
-  const scratchDir = path.join(root, ".career-ops-web", "pdf-tmp");
-  fs.mkdirSync(scratchDir, { recursive: true });
+  const bundle = path.join(root, "output", `${String(Number(input)).padStart(3, "0")}-${companySlug}-${roleSlug}`);
+  const version = "v001";
+  const documents = path.join(bundle, "documents");
+  const cv = path.join(bundle, "cv", "tailored", version);
+  const cover = path.join(bundle, "cover", "tailored", version);
   return {
     ok: true,
     paths: {
-      html: path.join(scratchDir, `cv-web-${input}.html`),
-      finalPdf: path.join(root, "output", `cv-${candidateSlug}-${companySlug}-${today}.pdf`),
+      draft: path.join(documents, "draft.web.json"),
+      cvTex: path.join(cv, "cv.tex"),
+      coverTex: path.join(cover, "cover.tex"),
+      finalPdf: path.join(cv, "cv.pdf"),
+      coverPdf: path.join(cover, "cover.pdf"),
+      style: path.join(documents, "style.cls"),
+      manifest: path.join(documents, "manifest.json"),
+      report: { number: String(Number(input)).padStart(3, "0"), company: companySlug, role, url },
     },
   };
 }

@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildHtml } from '../generate-cover-letter.mjs';
+import { buildHtml, renderVoyagerCoverTex } from '../generate-cover-letter.mjs';
 
 const writeTemplate = (body) => {
   const dir = mkdtempSync(join(tmpdir(), 'cover-placeholder-'));
@@ -69,4 +69,21 @@ test('the shipped template still renders clean', () => {
   const html = buildHtml(payload(), 'templates/cover-letter-template.html');
   assert.doesNotMatch(html, /\{\{[A-Z_]+\}\}/, 'bundled template must be fully mapped');
   assert.match(html, /Jane Doe/);
+});
+
+test('renders the standalone PDF source as VOYAGER TeX, not HTML', () => {
+  const tex = renderVoyagerCoverTex({
+    candidate: { name: 'Jane Doe', email: 'jane@example.test', location: 'Boulder, CO' },
+    letter: {
+      company: 'Acme',
+      role_title: 'Backend Engineer',
+      opening: 'I am applying for this role.',
+      profile_intro: 'Five years of backend work.',
+      closing: 'I would welcome a conversation.',
+    },
+  });
+  assert.match(tex, /\\documentclass\[coverletter\]\{style\}/);
+  assert.match(tex, /\\coverLetterGreeting\{Acme\}/);
+  assert.match(tex, /Jane Doe/);
+  assert.doesNotMatch(tex, /<html|<body/i);
 });

@@ -202,3 +202,10 @@ documents/*
 data/intake-state.json
 # Ad-hoc one-off automation artifacts (drain/anchor scripts, scraped JD texts)
 scratch/
+
+# Foreign repo copy (VOYAGER, gitignored — user layer)
+careers/
+
+# Resumable batch work products; source TSVs and logs are regenerated per run.
+batch/run-full-batch.log
+batch/slices/

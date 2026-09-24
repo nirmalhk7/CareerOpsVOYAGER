@@ -29,18 +29,25 @@ function makeRoot({ profileYaml } = {}) {
   return root;
 }
 
-test("resolvePdfPaths: happy path builds html + finalPdf from report + profile", () => {
+test("resolvePdfPaths: assigns the web PDF run a paired Voyager bundle", () => {
   // Given a root with a resolvable report and a named candidate
   const root = makeRoot();
-  const findReportFile = (input) => (input === "018" ? join(root, "reports", "018-acme-2026-07-01.md") : null);
+  const report = join(root, "reports", "018-acme-2026-07-01.md");
+  mkdirSync(join(root, "reports"), { recursive: true });
+  writeFileSync(report, "**Role:** Platform Engineer\n");
+  const findReportFile = (input) => (input === "018" ? report : null);
   try {
     // When resolving paths for report #018
     const result = resolvePdfPaths("018", "2026-07-26", root, findReportFile);
 
-    // Then it returns deterministic scratch + final paths using the candidate/company slugs
+    // Then it reserves resume, cover-letter, class, and manifest paths together.
     assert.equal(result.ok, true);
-    assert.equal(result.paths.html, join(root, ".career-ops-web", "pdf-tmp", "cv-web-018.html"));
-    assert.equal(result.paths.finalPdf, join(root, "output", "cv-jane-smith-acme-2026-07-26.pdf"));
+    assert.equal(result.paths.draft, join(root, "output", "018-acme-platform-engineer", "documents", "draft.web.json"));
+    assert.equal(result.paths.cvTex, join(root, "output", "018-acme-platform-engineer", "cv", "tailored", "v001", "cv.tex"));
+    assert.equal(result.paths.coverTex, join(root, "output", "018-acme-platform-engineer", "cover", "tailored", "v001", "cover.tex"));
+    assert.equal(result.paths.finalPdf, join(root, "output", "018-acme-platform-engineer", "cv", "tailored", "v001", "cv.pdf"));
+    assert.equal(result.paths.coverPdf, join(root, "output", "018-acme-platform-engineer", "cover", "tailored", "v001", "cover.pdf"));
+    assert.equal(result.paths.style, join(root, "output", "018-acme-platform-engineer", "documents", "style.cls"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -82,7 +89,7 @@ test("resolvePdfPaths: no matching report -> ok:false, no directories created", 
   }
 });
 
-test("resolvePdfPaths: missing profile.yml falls back to the default candidate slug", () => {
+test("resolvePdfPaths: does not depend on profile.yml for Voyager bundle paths", () => {
   // Given a root with a resolvable report but no profile.yml at all
   const root = makeRoot({ profileYaml: null });
   const findReportFile = (input) => (input === "5" ? join(root, "reports", "5-globex-2026-07-01.md") : null);
@@ -90,15 +97,15 @@ test("resolvePdfPaths: missing profile.yml falls back to the default candidate s
     // When resolving paths for report #5
     const result = resolvePdfPaths("5", "2026-07-26", root, findReportFile);
 
-    // Then it still succeeds, using the "candidate" fallback slug
+    // Then it still succeeds with the role fallback.
     assert.equal(result.ok, true);
-    assert.equal(result.paths.finalPdf, join(root, "output", "cv-candidate-globex-2026-07-26.pdf"));
+    assert.equal(result.paths.finalPdf, join(root, "output", "005-globex-role", "cv", "tailored", "v001", "cv.pdf"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("resolvePdfPaths: malformed profile.yml falls back to the default candidate slug", () => {
+test("resolvePdfPaths: ignores malformed profile.yml when resolving a Voyager bundle", () => {
   // Given a root with a resolvable report and an unparseable profile.yml
   const root = makeRoot({ profileYaml: "candidate: [unterminated" });
   const findReportFile = (input) => (input === "5" ? join(root, "reports", "5-globex-2026-07-01.md") : null);
@@ -106,9 +113,9 @@ test("resolvePdfPaths: malformed profile.yml falls back to the default candidate
     // When resolving paths for report #5
     const result = resolvePdfPaths("5", "2026-07-26", root, findReportFile);
 
-    // Then it still succeeds, using the "candidate" fallback slug rather than throwing
+    // Then it still succeeds, because profile data does not choose the path.
     assert.equal(result.ok, true);
-    assert.equal(result.paths.finalPdf, join(root, "output", "cv-candidate-globex-2026-07-26.pdf"));
+    assert.equal(result.paths.finalPdf, join(root, "output", "005-globex-role", "cv", "tailored", "v001", "cv.pdf"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -124,13 +131,13 @@ test("resolvePdfPaths: report filename that doesn't match the expected pattern f
 
     // Then it still succeeds, using the "company" fallback slug
     assert.equal(result.ok, true);
-    assert.equal(result.paths.finalPdf, join(root, "output", "cv-jane-smith-company-2026-07-26.pdf"));
+    assert.equal(result.paths.finalPdf, join(root, "output", "007-company-role", "cv", "tailored", "v001", "cv.pdf"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("resolvePdfPaths: profile.yml present but candidate.full_name empty falls back to the default candidate slug", () => {
+test("resolvePdfPaths: profile name never changes the Voyager bundle key", () => {
   // Given a profile.yml with a candidate block but no usable full_name
   const root = makeRoot({ profileYaml: 'candidate:\n  full_name: ""\n  email: "jane@example.com"\n' });
   const findReportFile = (input) => (input === "5" ? join(root, "reports", "5-globex-2026-07-01.md") : null);
@@ -138,9 +145,9 @@ test("resolvePdfPaths: profile.yml present but candidate.full_name empty falls b
     // When resolving paths for report #5
     const result = resolvePdfPaths("5", "2026-07-26", root, findReportFile);
 
-    // Then it still succeeds, using the "candidate" fallback slug
+    // Then it still succeeds with the stable report/company/role key.
     assert.equal(result.ok, true);
-    assert.equal(result.paths.finalPdf, join(root, "output", "cv-candidate-globex-2026-07-26.pdf"));
+    assert.equal(result.paths.finalPdf, join(root, "output", "005-globex-role", "cv", "tailored", "v001", "cv.pdf"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

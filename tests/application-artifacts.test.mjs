@@ -25,7 +25,11 @@ try {
   const paths = applicationArtifactPaths({ reportNum: 7, company: 'Acme AI', role: 'Senior AI Engineer', version: 2, root });
   if (paths.key === '007-acme-ai-senior-ai-engineer'
       && paths.cv.source.html === join(paths.root, 'cv', 'source', 'original.html')
-      && paths.cv.tailored.pdf === join(paths.root, 'cv', 'tailored', 'v002', 'cv.pdf')) {
+      && paths.cv.tailored.pdf === join(paths.root, 'cv', 'tailored', 'v002', 'cv.pdf')
+      && paths.cv.tailored.tex === join(paths.root, 'cv', 'tailored', 'v002', 'cv.tex')
+      && paths.cover.tailored.pdf === join(paths.root, 'cover', 'tailored', 'v002', 'cover.pdf')
+      && paths.documents.draft === join(paths.root, 'documents', 'draft.json')
+      && paths.documents.style === join(paths.root, 'documents', 'style.cls')) {
     console.log('  ✅ application artifacts use a stable report/company/role bundle');
   } else {
     throw new Error(`unexpected artifact paths: ${JSON.stringify(paths)}`);
@@ -35,6 +39,8 @@ try {
   if (existsSync(join(paths.root, 'jd'))
       && existsSync(join(paths.root, 'cv', 'source'))
       && existsSync(join(paths.root, 'cv', 'tailored', 'v002'))
+      && existsSync(join(paths.root, 'cover', 'tailored', 'v002'))
+      && existsSync(join(paths.root, 'documents'))
       && existsSync(join(paths.root, 'decision'))) {
     console.log('  ✅ application artifact directories initialize together');
   } else {

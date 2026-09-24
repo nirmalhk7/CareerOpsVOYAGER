@@ -10,8 +10,8 @@ import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr, killMsFo
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, readLanguageConfig } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
-import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
-import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
+import { renderAndMarkVoyager, writeVoyagerDraft, pdfRunOutcome } from "@/lib/pdf-render.mjs";
+import { createVoyagerDraftFilter } from "@/lib/voyager-draft.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { capabilitiesFor } from "@/lib/worker-capabilities.mjs";
 import { fencingReport } from "@/lib/cli-fencing.mjs";
@@ -48,7 +48,7 @@ export async function POST(req: Request) {
   // it to modes/oferta.md meant a configured market passed a check on a file the
   // run never opens, and would have missed a market dir with no evaluation mode.
   const lang = readLanguageConfig();
-  const needsScript: Record<string, string> = { evaluate: lang.evalModeFile, "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs" };
+  const needsScript: Record<string, string> = { evaluate: lang.evalModeFile, "fix-portal": "integrations/voyager/generate-documents.mjs" };
   const required = needsScript[kind];
   // CAREER_OPS_ROOT is runtime user data, not a build input. Tracing this
   // dynamic path would copy the whole web project into every server bundle.
@@ -289,7 +289,7 @@ export async function POST(req: Request) {
       if (fencing.notice) send({ type: "status", label: fencing.notice });
       // Time-based keepalive. The stream is silent whenever the agent is thinking
       // or inside a long tool call, and in pdf mode it is silent for the whole
-      // 15-25 KB <<cv-html>> envelope (cvFilter swallows every byte). Measured
+          // structured Voyager envelope (cvFilter swallows every byte). Measured
       // idle gaps on a real pdf run reached 149s — long enough for the browser or
       // a proxy to drop the connection, after which the client reports
       // "Connection error" even though the agent finished and the PDF rendered.
@@ -310,7 +310,7 @@ export async function POST(req: Request) {
       // by the agent (#2185). The filter keeps every byte for the backend while
       // holding the 15-25 KB body out of the run log, which is the agent's
       // narration — see cv-envelope.mjs.
-      const cvFilter = kind === "pdf" ? createCvEnvelopeFilter() : null;
+      const cvFilter = kind === "pdf" ? createVoyagerDraftFilter() : null;
       // While the agent emits the 15-25 KB <<cv-html>> envelope, cvFilter swallows
       // every byte, so the response stream goes completely silent for as long as
       // the model takes to write the CV — a minute or more. Nothing downstream can
@@ -328,9 +328,9 @@ export async function POST(req: Request) {
         for (const w of warnings) send({ type: "text", text: `⚠️ ${w}\n` });
       };
       /** Persist the emitted CV; streams the reason and returns false on failure. */
-      const saveCv = (paths: PdfPaths, envelope: CvEnvelope) => {
-        const written = writeCvHtml({ pdfPaths: paths, html: envelope.html });
-        if (!written.ok) send({ type: "error", msg: written.error.slice(0, 200) });
+      const saveCv = (paths: PdfPaths, envelope: { draft: object }) => {
+        const written = writeVoyagerDraft({ pdfPaths: paths, draft: envelope.draft });
+        if (!written.ok) send({ type: "error", msg: (written.error ?? "Could not save Voyager draft").slice(0, 200) });
         return written.ok;
       };
 
@@ -394,28 +394,21 @@ export async function POST(req: Request) {
       });
       // Render + mark-tracker-ready live in pdf-render.mjs (plain, dependency-
       // injected, unit-tested) so the render-then-mark orchestration isn't
-      // buried untested inside this transport-layer closure. Runs generate-
-      // pdf.mjs and mark-pdf-ready.mjs as plain Node child processes — no agent
-      // CLI or its sandbox involved — so a browser launch never depends on an
-      // interactive approval nobody is present to grant in a headless/web-
-      // triggered run (#2172). The tracker is marked ✅ only after a CONFIRMED
-      // successful render, not optimistically — same honesty-gate discipline as
-      // the evaluate path below.
-      const renderPdf = async (paths: PdfPaths, format: "letter" | "a4") => {
-        send({ type: "status", label: "Rendering PDF…" });
+      // buried untested inside this transport-layer closure.
+      const renderPdf = async (paths: PdfPaths, reportNum: string) => {
+        send({ type: "status", label: "Rendering Voyager resume and cover letter…" });
         // renderAndMarkPdf is designed to resolve, never throw — but this is
         // the one place nothing else awaits or catches this promise (cancel()
         // only attaches a .finally for the write-token release), so an
         // unexpected exception here must still close the stream instead of
         // leaving it — and the write-token — open until process shutdown.
         try {
-          const result = await renderAndMarkPdf({
+          const result = await renderAndMarkVoyager({
             spawnFn: spawn,
             execPath: process.execPath,
             root: careerOpsRoot(),
             pdfPaths: paths,
-            format,
-            reportNum: input,
+            reportNum,
           });
           if (result.kind === "render-failed") {
             send({ type: "error", msg: result.error.slice(0, 200) });
@@ -423,7 +416,7 @@ export async function POST(req: Request) {
           }
           // Non-fatal issues (a defaulted page format, a tracker row not marked) still
           // surface here rather than only in a server log nobody sees.
-          sendWarnings(result.warnings);
+          sendWarnings(result.warnings ?? []);
           send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
         } catch (e) {
           send({ type: "error", msg: `PDF rendering crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) });
@@ -503,11 +496,12 @@ export async function POST(req: Request) {
             // one outcome this handler exists to prevent.
             send({ type: "error", msg: "Internal error: the pdf run passed its gate with no CV to save — please report this." });
           } else {
-            sendWarnings(envelope.warnings);
-            if (saveCv(pdfPaths, envelope)) {
+            const voyagerEnvelope = envelope as { ok: true; draft: object; warnings: string[] };
+            sendWarnings(voyagerEnvelope.warnings ?? []);
+            if (saveCv(pdfPaths, voyagerEnvelope)) {
               // Tracked so cancel() can defer releasing writeToken until this
               // settles; close() happens once rendering finishes, not here.
-              pdfRenderPromise = renderPdf(pdfPaths, envelope.format);
+              pdfRenderPromise = renderPdf(pdfPaths, input);
               return;
             }
             // saveCv already streamed the specific reason.

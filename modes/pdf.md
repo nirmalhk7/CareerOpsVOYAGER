@@ -7,7 +7,7 @@ Optional pass:
 
 ## Application-scoped artifacts
 
-When a CV is reused or lightly tailored for an existing application, initialize a bundle with `npm run application:init -- --report {report-number} --company "{company}" --role "{role}" --version 1`. Keep the current JD at `jd/current.md`, the comparison JD at `jd/previous.md`, the source CV at `cv/source/original.html`, the tailored CV at `cv/tailored/v001/cv.html`, the PDF at `cv/tailored/v001/cv.pdf`, the change notes at `cv/tailored/v001/changes.md`, and the reuse decision at `decision/reuse.json` under the printed bundle root. Resolve the application/report first with `node find.mjs {report-or-tracker-number}` so the bundle uses the report number, not an ambiguous tracker row.
+When a CV is reused or lightly tailored for an existing application, initialize a bundle with `npm run application:init -- --report {report-number} --company "{company}" --role "{role}" --version 1`. Keep the current JD at `jd/current.md`, the comparison JD at `jd/previous.md`, the generated resume at `cv/tailored/v001/cv.tex` + `cv.pdf`, the generated cover letter at `cover/tailored/v001/cover.tex` + `cover.pdf`, and the generation manifest at `documents/manifest.json` under the printed bundle root. Both TeX files compile with the bundle's copied `documents/style.cls`, taken verbatim from the user's VOYAGER class. Resolve the application/report first with `node find.mjs {report-or-tracker-number}` so the bundle uses the report number, not an ambiguous tracker row.
 
 Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previous.md` when both comparison sources exist. Record the visible decision (`reuse`, `reuse-with-edits`, or `regenerate`), score, source CV/JD paths, and changed sections in `decision/reuse.json`. Strongly discourage applications scoring below 4.0/5 and proceed only when the user explicitly overrides that recommendation. Reuse only after a visible `reuse` result or an explicit user override; never silently reuse when a source is missing. The PDF manifest supports these nested paths and continues to link them to the report. Flat `output/` paths remain valid for one-off PDFs.
 
@@ -40,23 +40,23 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
 14. Inject keywords naturally into existing achievements (NEVER invent)
 15. Apply the six-second clarity gate from `modes/heuristics/recruiter-side.md`: top third must make target role, strongest fit, and proof obvious
 16. Read `name` from `config/profile.yml` → normalize to kebab-case lowercase (e.g. "John Doe" → "john-doe") → `{candidate}`
-17. Build the render payload (see the **JSON Input Schema** below) from the tailored content — emit compact structured JSON, **not** full HTML markup — and write it to `/tmp/cv-{candidate}-{company}.json`
-18. Run `node build-cv-html.mjs /tmp/cv-{candidate}-{company}.json {html-path} {template}`, where `{html-path}` is the active bundle's `cv/tailored/vNNN/cv.html` or `output/cv-{candidate}-{company}.html` for a one-off CV, and `{template}` is the path printed by **Selecting the template** below (omit it to use the base template). The script owns every tag, CSS class, and HTML escaping. Keep the HTML outside temporary storage because the dashboard's `D` hotkey regenerates from it.
-19. Run the fact gate against the generated HTML: `node verify-cv-facts.mjs {html-path}`
-    - This is a hard gate before PDF rendering.
-    - If it fails, stop and fix the generated HTML by removing invented metrics or adding verified evidence to `cv.md`, `article-digest.md`, or `config/cv-facts.json`.
+17. Initialize the application bundle, then build a compact `documents/draft.json` for `integrations/voyager/generate-documents.mjs`. The AI supplies only truthful candidate-specific text and the requirement-to-source `evidence[]` mappings; the renderer supplies all TeX commands, escaping, and template structure. The draft must include the tailored `cv` sections and a tailored `cover` object, so every PDF run produces both documents from the same evidence set. Never emit full TeX or HTML markup.
+
+    The draft is the Voyager template's field map. Use this shape (with the bundle paths printed by `application-artifacts.mjs`):
+    ```json
+    {"schema_version":1,"report":{"number":"007","company":"Acme","role":"Platform Engineer","url":"https://…"},"candidate":{"name":"…","contact_line":"…","email":{"url":"mailto:…","display":"…"}},"variant":"platform","headline":"…","evidence":[{"requirement":"Kubernetes","source":"cv.md:42","strength":"strong"}],"cv":{"experience":[{"company":"…","role":"…","location":"…","dates":"…","bullets":["…"]}],"projects":[],"education":[],"awards":[],"skills":[{"category":"…","items":"…"}]},"cover":{"greeting":"…","subject":"…","opening":"…","body":"…","closing":"…"},"paths":{"cv_tex":"…/cv.tex","cover_tex":"…/cover.tex","style":"…/documents/style.cls","manifest":"…/documents/manifest.json"}}
+    ```
+18. Validate the draft without writing artifacts: `node integrations/voyager/generate-documents.mjs preview --draft {bundle-root}/documents/draft.json`. Treat any validation error as a hard stop; correct the structured text or evidence mappings before rendering.
+19. Render the approved bundle: `node integrations/voyager/generate-documents.mjs render --draft {bundle-root}/documents/draft.json --approved`. This writes `cv/tailored/vNNN/cv.tex`, `cover/tailored/vNNN/cover.tex`, and their PDFs, then invokes `integrations/voyager/build.mjs` once per TeX file with the copied `{bundle-root}/documents/style.cls`. Do not call `generate-pdf.mjs`, `build-cv-html.mjs`, or an HTML renderer.
 20. **Hiring-manager audit — off by default, opt-in only.** Run `modes/pdf/hm-audit.md` if and only if one of these is true; otherwise skip straight to Step 21 without prompting.
     - The invocation carried `--hm-audit` (`/career-ops pdf --hm-audit`, or the same flag on a natural-language request).
     - `modes/_custom.md` turns it on as a house rule.
 
-    The fact gate proves nothing was invented; it cannot tell you whether these are the *right* bullets for the role. The audit researches the likely reviewer, dispatches a separate subagent role-playing them, and returns a bullet-by-bullet keep/cut/rewrite verdict plus a blunt "would I advance this to a screen?" call. It adds a subagent dispatch plus web research on top of the tailoring, which is why it is opted into rather than run on every PDF.
+    The evidence map proves every generated claim traces to a candidate source; it cannot tell you whether these are the *right* bullets for the role. The audit researches the likely reviewer, dispatches a separate subagent role-playing them, and returns a bullet-by-bullet keep/cut/rewrite verdict plus a blunt "would I advance this to a screen?" call. It adds a subagent dispatch plus web research on top of the tailoring, which is why it is opted into rather than run on every PDF.
 
-    The audit recommends; the user decides. If they take any rewrite, return to Step 17, rebuild the payload and the HTML, and re-run the fact gate before rendering. The audit is persisted only once that decision is known, and records which rewrites were applied — so the `## HM Audit` section never describes a CV the rendered PDF no longer matches. Do not re-run the audit against the rebuilt CV: a second dispatch doubles the cost for a verdict the user has already acted on.
-21. Execute: `node generate-pdf.mjs {html-path} {pdf-path} --format={letter|a4} --report={report number}`, where `{pdf-path}` is the active bundle's `cv/tailored/vNNN/cv.pdf` or `output/cv-{candidate}-{company}-{YYYY-MM-DD}.pdf` for a one-off CV. `{report number}` is the NNN from the report filename/link (e.g. `008` for `reports/008-acme-….md`), not the tracker `#` column. Pass it whenever the application has (or will have) a report; it records the PDF↔report linkage in `data/pdf-index.tsv` so the dashboard can open and regenerate the exact nested or flat HTML/PDF pair. Omit it only for one-off CVs with no tracker entry.
-    - The rendered PDF has a two-page warning threshold by default. `--max-pages=N` accepts a positive integer; pass `--max-pages=1` when the user or market prefers a one-page CV.
-    - If the rendered PDF exceeds its threshold, generation warns loudly with the actual and allowed page counts plus trimming guidance, then reports and indexes the unchanged PDF so existing longer-CV flows keep working.
-    - Pass `--strict-pages` only when the user or market requires a hard limit. Strict overflow leaves the draft available for inspection but does not report or index it as successful; trim lower-priority content and rerun.
-22. Report: PDF path, number of pages, keyword coverage %, and any skill gaps from Step 4 still unaddressed
+    The audit recommends; the user decides. If they take any rewrite, return to Step 17, rebuild the draft, re-run `preview`, then render again. The audit is persisted only once that decision is known, and records which rewrites were applied — so the `## HM Audit` section never describes a CV the rendered PDF no longer matches. Do not re-run the audit against the rebuilt CV: a second dispatch doubles the cost for a verdict the user has already acted on.
+21. Verify both generated PDFs with `pdfinfo` and render their first pages for visual inspection before reporting success. If either output is missing, overflows, or has layout defects, revise the source draft and render a new version.
+22. Report: resume PDF path, cover-letter PDF path, number of pages for each, keyword coverage %, and any skill gaps from Step 4 still unaddressed.
 
 ## ATS Rules (clean parsing)
 
@@ -70,7 +70,7 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
 - Distributed JD keywords: Summary (top 5), first bullet of each role, Skills section
 - No hidden text, keyword stuffing, or white-font tricks. Optimize for parseability plus human review.
 
-**Optional parseability check:** after generating the HTML you can score it for ATS-friendliness with `node verify-ats.mjs output/cv-{candidate}-{company}.html` (see `modes/ats.md`). This is deterministic, read-only, and advisory — it reports a 0-100 score plus concrete issues but never blocks generation (unlike the `verify-cv-facts.mjs` fact gate in Step 18).
+**Optional parseability check:** after generating the TeX/PDF bundle, inspect the extracted text with `pdftotext {bundle-root}/cv/tailored/vNNN/cv.pdf -`. This is deterministic and advisory; it never bypasses the fact gate or authorizes ungrounded claims.
 
 ## Recruiter Review Gates
 
@@ -109,7 +109,9 @@ Examples of legitimate reformulation:
 
 **NEVER add skills that the candidate does not have. Only reword real experience using the exact JD vocabulary.**
 
-## Template HTML
+## Retired HTML / Canva reference — do not use
+
+The HTML and Canva instructions below are historical reference only. They are not a compatibility path for `/career-ops pdf`: do not create HTML, do not call `build-cv-html.mjs`, `generate-pdf.mjs`, `build-cv-latex.mjs`, or `integrations/voyager/build.mjs --html` (that flag no longer exists). The active contract is Steps 17–22 above: have the AI fill `documents/draft.json` from `cv.md` and the JD, preview it, obtain approval, then run `integrations/voyager/generate-documents.mjs render --approved`. That command writes the paired TeX files and calls `integrations/voyager/build.mjs` with the copied `documents/style.cls`.
 
 **Before generating: read `modes/_custom.md` (if it exists) and apply its formatting/content house rules to every CV in this session — including every item of a batch.** Rules recorded there (date formats, section-order preferences, content to always/never include) are persistent user instructions, not suggestions; if the user corrects the same thing twice in conversation, write it into `modes/_custom.md` so it stops drifting.
 
@@ -192,7 +194,7 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
 | Field | Type | Notes |
 |-------|------|-------|
 | `lang` | string | CV language code (`en`, `es`, `zh-CN`, `ja`, `ar`). Drives language-specific CSS: `zh-CN` enables Simplified Chinese fonts and strict CJK line breaking; `ja` enables a Japanese CJK font fallback; `ar` enables RTL + Arabic fonts. Defaults to `en`. |
-| `page_format` | string | `letter` → `8.5in` page width, `a4` → `210mm`. Defaults to `letter`. Pass the SAME value to `generate-pdf.mjs --format`. |
+| `page_format` | string | `letter` → `8.5in` page width, `a4` → `210mm`. Defaults to `letter`. Pass the SAME value to `integrations/voyager/build.mjs --html --format`. |
 | `candidate.name` | string | From `profile.yml`. |
 | `candidate.phone` | string | Optional — **omit or leave empty** to drop the `tel:` link and its separator (no empty cell). |
 | `candidate.email` | string | From `profile.yml`. |

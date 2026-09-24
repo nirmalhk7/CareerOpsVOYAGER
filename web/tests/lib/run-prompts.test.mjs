@@ -10,7 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildPrompt, isShellSafeCompanyName } from "../../src/lib/run-prompts.mjs";
-import { OPEN_MARK, CLOSE_MARK } from "../../src/lib/cv-envelope.mjs";
+import { OPEN_MARK, CLOSE_MARK } from "../../src/lib/voyager-draft.mjs";
 import { grantsWriteCapability, toolScopeFor } from "../../src/lib/claude-invocation.mjs";
 
 const ARGS = { input: "018", memory: "", today: "2026-08-04" };
@@ -24,7 +24,7 @@ test("buildPrompt: the pdf prompt asks for the envelope and forbids saving", () 
   assert.ok(prompt.includes(CLOSE_MARK), "pdf prompt must name the closing marker");
   // ...and tells it not to save, so an agent that ignores the envelope has been
   // told twice
-  assert.match(prompt, /Do NOT save or edit any file/i);
+  assert.match(prompt, /Do NOT save or edit files/i);
 });
 
 test("buildPrompt: the pdf prompt does not claim the agent has no write tools", () => {
@@ -50,16 +50,13 @@ test("buildPrompt: the pdf prompt never tells the agent to save a file", () => {
   assert.ok(!/\.meta\.json/.test(prompt), "pdf prompt must not name the sidecar path");
 });
 
-test("buildPrompt: the pdf prompt offers both page formats", () => {
-  // Given the marker example once interpolated the parser's FALLBACK, which made
-  // the prompt read "choose letter for a US/Canada company, otherwise letter" —
-  // biasing every CV to one size. The tailoring rule and the fallback are separate.
+test("buildPrompt: the pdf prompt requests a structured Voyager draft", () => {
   const prompt = buildPrompt({ kind: "pdf", ...ARGS });
 
-  // Then both spellings are shown, and the rule distinguishes them
-  assert.match(prompt, /format="a4"/);
-  assert.match(prompt, /format="letter"/);
-  assert.match(prompt, /letter for a US\/Canada company, otherwise a4/i);
+  // Then it names all content inputs while reserving path/template control for
+  // the backend; no HTML fallback can be selected by the agent.
+  assert.match(prompt, /candidate, variant, headline, evidence/i);
+  assert.match(prompt, /Do not include paths, report, HTML, or TeX/i);
 });
 
 test("buildPrompt: the pdf prompt still pins tailoring to the real mode", () => {
